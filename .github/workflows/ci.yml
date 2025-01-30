@@ -15,3 +15,24 @@ jobs:
       - run: cargo fmt -- --check
       - run: cargo clippy -- -D warnings
       - run: cargo test --all-features
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        toolchain:
+          - stable
+          - beta
+          - nightly
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --all-features

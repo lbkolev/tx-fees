@@ -53,5 +53,6 @@ COPY --from=builder /app/tx-fees /app
 #   I've approached it this way to simplify the project startup process as much as possible
 COPY ./migrations/ /app/migrations
 
+EXPOSE 8080
 ENTRYPOINT ["/app/tx-fees"]
 #----

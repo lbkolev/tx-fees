@@ -16,11 +16,13 @@ services:
   tx-fees:
     build: .
     container_name: tx_fees
+    ports:
+      - "8080:8080"
     depends_on: # start only when the db is available
       - db
     environment:
       DATABASE_URL: postgresql://user:password@db:5432/tx_fees?sslmode=disable
-      # optional, the program defaults to a public RPC —> wss://ethereum-rpc.publicnode.com
+      # optional, the program defaults to a public RPC provider
       #ETH_WS_RPC_URL: ..
     entrypoint: ["/app/tx-fees"]
 
