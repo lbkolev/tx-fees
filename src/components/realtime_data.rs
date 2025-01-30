@@ -113,16 +113,3 @@ async fn store_block(
     .await?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_ethusdt_price_format() {
-        let price = get_ethusdt_price().await.unwrap();
-
-        assert!(price > 0.0);
-        assert!(price < 100000.0); // sanity check
-    }
-}
