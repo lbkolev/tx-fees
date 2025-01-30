@@ -1,0 +1,7 @@
+target/
+.github/
+.dockerignore
+.gitignore
+.pre-commit-config.yaml
+Dockerfile
+README.md
