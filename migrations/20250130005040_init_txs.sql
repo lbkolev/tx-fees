@@ -1,0 +1,5 @@
+CREATE TABLE txs (
+    hash TEXT PRIMARY KEY,
+    block_hash TEXT NOT NULL REFERENCES blocks (hash) ON DELETE CASCADE,
+    fee_usdt DOUBLE PRECISION NOT NULL
+);
