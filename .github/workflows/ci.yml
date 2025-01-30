@@ -6,7 +6,7 @@ on:
 
 jobs:
   ci:
-    name: verify fmt/lints/build/tests
+    name: verify fmt/lints/build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -14,4 +14,24 @@ jobs:
       - run: cargo build --release
       - run: cargo fmt -- --check
       - run: cargo clippy -- -D warnings
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        toolchain:
+          - stable
+          - beta
+          - nightly
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --all-features

@@ -1,6 +1,5 @@
-mod components;
-
-use crate::components::realtime_data::realtime;
+use tx_fees::components::api::start_server;
+use tx_fees::components::realtime_data::realtime;
 
 use eyre::Result;
 use sqlx::{postgres::PgPoolOptions, PgPool};
@@ -22,9 +21,19 @@ async fn main() -> Result<()> {
         .max_connections(5)
         .connect(&database_url)
         .await?;
-    run_migrations(&db_pool).await?;
 
-    realtime(&db_pool, &rpc_url).await?;
+    run_migrations(&db_pool).await?;
+    tokio::select! {
+        realtime_result = realtime(&db_pool, &rpc_url) => {
+            realtime_result?;
+        }
+        server_result = start_server(db_pool.clone()) => {
+            server_result?;
+        }
+        _ = tokio::signal::ctrl_c() => {
+            println!("Shutting down...");
+        }
+    }
 
     Ok(())
 }
