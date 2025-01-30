@@ -1,0 +1,28 @@
+services:
+  db:
+    image: postgres:16
+    container_name: postgres_db
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: tx_fees
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  tx-fees:
+    build: .
+    container_name: tx_fees
+    depends_on: # start only when the db is available
+      - db
+    environment:
+      DATABASE_URL: postgresql://user:password@db:5432/tx_fees?sslmode=disable
+      # optional, the program defaults to a public RPC —> wss://ethereum-rpc.publicnode.com
+      #ETH_WS_RPC_URL: ..
+    entrypoint: ["/app/tx-fees"]
+
+volumes:
+  pg_data:

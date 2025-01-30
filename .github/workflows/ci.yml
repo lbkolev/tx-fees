@@ -1,5 +1,8 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+    branches: [master]
+  pull_request:
 
 jobs:
   ci:
@@ -8,7 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
       - run: cargo fmt -- --check
       - run: cargo clippy -- -D warnings
-      - run: cargo build --release
       - run: cargo test --all-features
