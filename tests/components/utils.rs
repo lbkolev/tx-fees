@@ -1,7 +1,9 @@
-use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
+use sqlx::{postgres::PgPoolOptions, PgPool, Postgres};
 use uuid::Uuid;
 
-pub async fn setup_test_db() -> std::result::Result<(Pool<Postgres>, String), sqlx::Error> {
+use tx_fees::components::api::AppServer;
+
+pub async fn setup_test_db() -> std::result::Result<(PgPool, String), sqlx::Error> {
     let db_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgresql://user:password@0.0.0.0:5432/".to_string());
     let db_pool = PgPoolOptions::new()
@@ -21,20 +23,55 @@ pub async fn setup_test_db() -> std::result::Result<(Pool<Postgres>, String), sq
     Ok((pool, db_name))
 }
 
-pub async fn teardown_test_db(
-    pool: Pool<Postgres>,
-    db_name: &String,
-) -> std::result::Result<(), sqlx::Error> {
-    // disconnect all connections from the pool or we won't be able to teardown
-    drop(pool);
+pub async fn teardown_test_db(app: TestApp) -> std::result::Result<(), sqlx::Error> {
+    // ensure there are no other connections active to the database
+    drop(app.db_pool);
 
     let db_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgresql://user:password@0.0.0.0:5432/postgres".to_string());
+
     let master_pool = PgPoolOptions::new().connect(&db_url).await?;
 
-    sqlx::query(&format!("DROP DATABASE IF EXISTS {}", db_name))
+    // forcefully end any leftover connections
+    sqlx::query(&format!(
+        "SELECT pg_terminate_backend(pg_stat_activity.pid)
+         FROM pg_stat_activity
+         WHERE datname = '{}'
+         AND pid <> pg_backend_pid();",
+        app.db_name
+    ))
+    .execute(&master_pool)
+    .await?;
+
+    sqlx::query(&format!("DROP DATABASE IF EXISTS {}", app.db_name))
         .execute(&master_pool)
         .await?;
 
     Ok(())
+}
+
+#[derive(Debug)]
+pub struct TestApp {
+    pub address: String,
+    pub port: u16,
+    pub db_pool: PgPool,
+    pub db_name: String,
+}
+
+pub async fn spawn_app() -> TestApp {
+    let (db_pool, db_name) = setup_test_db().await.unwrap();
+
+    let server_app = AppServer::build("localhost".to_string(), 0, db_pool.clone())
+        .await
+        .expect("Failed to build the Server application.");
+
+    let server_app_port = server_app.port();
+    let _ = tokio::spawn(async move { server_app.run_until_stopped().await });
+
+    TestApp {
+        address: format!("http://localhost:{}", server_app_port),
+        port: server_app_port,
+        db_pool,
+        db_name,
+    }
 }
