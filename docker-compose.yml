@@ -29,7 +29,7 @@ services:
     container_name: tx_fees
     ports:
       - "8080:8080"
-    depends_on: # start only when the db is available
+    depends_on:
       - postgres
       - redis
     environment:
