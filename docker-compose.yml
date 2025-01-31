@@ -1,7 +1,7 @@
 services:
-  db:
+  postgres:
     image: postgres:16
-    container_name: postgres_db
+    container_name: postgres
     restart: always
     environment:
       POSTGRES_USER: user
@@ -11,20 +11,34 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+  redis:
+    image: redis:6.2
+    restart: unless-stopped
+    container_name: redis
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
+    ports:
+      - "6379:6379"
+    command: redis-server --save 20 1 --loglevel warning
+    volumes:
+      - redis_data:/data
 
   tx-fees:
     build: .
     container_name: tx_fees
     ports:
       - "8080:8080"
-    depends_on: # start only when the db is available
-      - db
+    depends_on:
+      - postgres
+      - redis
     environment:
-      DATABASE_URL: postgresql://user:password@db:5432/tx_fees?sslmode=disable
+      DATABASE_URL: postgresql://user:password@postgres:5432/tx_fees?sslmode=disable
+      REDIS_URL: redis://redis:6379
       # optional, the program defaults to a public RPC provider
       #ETH_WS_RPC_URL: ..
     entrypoint: ["/app/tx-fees"]
 
 volumes:
-  pg_data:
+  postgres_data:
+  redis_data:
