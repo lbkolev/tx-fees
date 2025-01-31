@@ -1,10 +1,14 @@
+use actix_web::dev::Server;
 use actix_web::{web, App, HttpResponse, HttpServer};
 use regex::Regex;
 use serde::Serialize;
 use serde_json::json;
+use sqlx::PgPool;
 use tracing::{error, warn};
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
+
+use std::net::TcpListener;
 
 #[derive(Serialize, ToSchema)]
 struct TxFee {
@@ -17,7 +21,7 @@ struct TxFee {
 
 // used to sanity check the user tx_hash input
 fn is_valid_tx_hash(tx_hash: &str) -> bool {
-    let re = Regex::new(r"^0x[a-fA-F0-9]{64}$").unwrap();
+    let re = Regex::new(r"^0x([A-Fa-f0-9]{64})$").unwrap();
     re.is_match(tx_hash)
 }
 
@@ -81,8 +85,34 @@ async fn get_fee(db_pool: web::Data<sqlx::PgPool>, tx_hash: web::Path<String>) -
 )]
 struct ApiDoc;
 
-pub async fn start_server(db_pool: sqlx::PgPool) -> std::io::Result<()> {
-    HttpServer::new(move || {
+pub struct AppServer {
+    port: u16,
+    server: Server,
+}
+
+impl AppServer {
+    pub async fn build(host: String, port: u16, db_pool: PgPool) -> eyre::Result<Self> {
+        let listener = TcpListener::bind(format!("{}:{}", host, port))?;
+        let port = listener.local_addr().unwrap().port();
+        let server = start_server(listener, db_pool)?;
+
+        Ok(Self { port, server })
+    }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    pub async fn run_until_stopped(self) -> std::result::Result<(), std::io::Error> {
+        self.server.await
+    }
+}
+
+fn start_server(
+    listener: TcpListener,
+    db_pool: PgPool,
+) -> std::result::Result<Server, std::io::Error> {
+    let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
             .service(
@@ -91,7 +121,45 @@ pub async fn start_server(db_pool: sqlx::PgPool) -> std::io::Result<()> {
             )
             .route("/fee/{tx_hash}", web::get().to(get_fee))
     })
-    .bind("0.0.0.0:8080")?
-    .run()
-    .await
+    .listen(listener)?
+    .run();
+
+    Ok(server)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_valid_tx_hash() {
+        let cases = vec![
+            (
+                "0x05f23901ca4a9f69e3ff0af3dec39f2876000974fc9d64f53897bf5ac5e3e700",
+                true,
+            ), // valid hash
+            (
+                "0x05F23901CA4A9F69E3FF0AF3DEC39F2876000974FC9D64F53897BF5AC5E3E700",
+                true,
+            ), // valid hash uppercase
+            ("0x12345", false), // too short
+            (
+                "0x05f23901ca4a9f69e3ff0af3decQQ9f2876000974fc9d64f53897bf5ac5e3e700",
+                false,
+            ), // invalid characters
+            (
+                "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab",
+                false,
+            ), // Missing 0x prefix
+        ];
+
+        for (tx_hash, expected) in cases {
+            assert_eq!(
+                is_valid_tx_hash(tx_hash),
+                expected,
+                "Failed for {}",
+                tx_hash
+            );
+        }
+    }
 }
