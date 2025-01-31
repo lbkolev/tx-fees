@@ -1,14 +1,16 @@
 use actix_web::dev::Server;
 use actix_web::{web, App, HttpResponse, HttpServer};
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
 use tracing::{error, warn};
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
+use std::fmt::Display;
 use std::net::TcpListener;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Serialize, ToSchema)]
 struct TxFee {
@@ -69,18 +71,129 @@ async fn get_fee(db_pool: web::Data<sqlx::PgPool>, tx_hash: web::Path<String>) -
         }),
         Ok(None) => HttpResponse::NotFound().finish(),
         Err(e) => {
-            error!("Database error: {:?}", e);
+            error!("db err: {:?}", e);
             HttpResponse::InternalServerError().finish()
         }
     }
 }
 
+#[derive(Serialize, Deserialize, ToSchema)]
+pub struct BatchJobRequest {
+    start_time: i64,
+    end_time: i64,
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct BatchJobResponse {
+    job_id: i64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum BatchJobStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+impl Display for BatchJobStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BatchJobStatus::Pending => write!(f, "pending"),
+            BatchJobStatus::InProgress => write!(f, "in_progress"),
+            BatchJobStatus::Completed => write!(f, "completed"),
+        }
+    }
+}
+
+// used by the batch_job endpoint
+// verifies:
+//  1. start time is after defi started
+//  2. end time is not in the future
+//  3. start time is lower than end time
+fn is_valid_time_range(start_time: i64, end_time: i64) -> bool {
+    const DEFI_START: i64 = 1514764800; // 2018-01-01
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+
+    start_time >= DEFI_START && end_time <= now && start_time < end_time
+}
+
+#[utoipa::path(
+    post,
+    path = "/batch_job",
+    request_body = BatchJobRequest,
+    responses(
+        (status = 200, description = "Batch job created", body = BatchJobResponse),
+        (status = 400, description = "Invalid time range"),
+        (status = 500, description = "Internal server error"),
+    )
+)]
+async fn create_batch_job(
+    db_pool: web::Data<PgPool>,
+    redis: web::Data<redis::Client>,
+    req: web::Json<BatchJobRequest>,
+) -> HttpResponse {
+    if !is_valid_time_range(req.start_time, req.end_time) {
+        return HttpResponse::BadRequest()
+            .json(json!({"error": "Invalid time range. Must be between 2018-01-01 and now"}));
+    }
+
+    let job_id = match sqlx::query!(
+        "INSERT INTO batch_jobs (start_time, end_time, status) VALUES ($1, $2, $3) RETURNING id",
+        req.start_time,
+        req.end_time,
+        BatchJobStatus::Pending.to_string()
+    )
+    .fetch_one(db_pool.get_ref())
+    .await
+    {
+        Ok(row) => row.id,
+        Err(e) => {
+            error!("db err: {:?}", e);
+            return HttpResponse::InternalServerError().finish();
+        }
+    };
+
+    let mut conn = match redis.get_ref().get_multiplexed_async_connection().await {
+        Ok(conn) => conn,
+        Err(e) => {
+            error!("redis err: {:?}", e);
+            return HttpResponse::InternalServerError().finish();
+        }
+    };
+
+    if let Err(e) = redis::cmd("RPUSH")
+        .arg("batch_jobs")
+        .arg(job_id)
+        .query_async::<()>(&mut conn)
+        .await
+    {
+        error!("redis err: {:?}", e);
+        return HttpResponse::InternalServerError().finish();
+    }
+
+    HttpResponse::Ok().json(BatchJobResponse { job_id })
+}
+
 #[derive(OpenApi)]
 #[openapi(
-    paths(get_fee),
-    components(schemas(TxFee)),
+    paths(
+        get_fee,
+        create_batch_job
+    ),
+    components(
+        schemas(
+            TxFee,
+            BatchJobRequest,
+            BatchJobResponse
+        )
+    ),
     tags(
-        (name = "Transaction Fees", description = "Endpoint used to retrieve transaction fees")
+        (name = "Transaction Fees", description = "Endpoint used to retrieve transaction fees"),
+        (name = "Batch Jobs", description = "Endpoint for managing fee calculation batch jobs")
     )
 )]
 struct ApiDoc;
@@ -91,10 +204,15 @@ pub struct AppServer {
 }
 
 impl AppServer {
-    pub async fn build(host: String, port: u16, db_pool: PgPool) -> eyre::Result<Self> {
+    pub async fn build(
+        host: String,
+        port: u16,
+        db_pool: PgPool,
+        redis_client: redis::Client,
+    ) -> eyre::Result<Self> {
         let listener = TcpListener::bind(format!("{}:{}", host, port))?;
         let port = listener.local_addr().unwrap().port();
-        let server = start_server(listener, db_pool)?;
+        let server = start_server(listener, db_pool, redis_client)?;
 
         Ok(Self { port, server })
     }
@@ -111,15 +229,18 @@ impl AppServer {
 fn start_server(
     listener: TcpListener,
     db_pool: PgPool,
+    redis_client: redis::Client,
 ) -> std::result::Result<Server, std::io::Error> {
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
+            .app_data(web::Data::new(redis_client.clone()))
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-docs/openapi.json", ApiDoc::openapi()),
             )
             .route("/fee/{tx_hash}", web::get().to(get_fee))
+            .route("/batch_job", web::post().to(create_batch_job))
     })
     .listen(listener)?
     .run();
@@ -159,6 +280,33 @@ mod tests {
                 expected,
                 "Failed for {}",
                 tx_hash
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_valid_time_range() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let cases = vec![
+            (1514764800, now, true),         // DeFi start to now - valid
+            (1514764799, now, false),        // before DeFi start - invalid
+            (1514764800, 1514764801, true),  // minimal valid range
+            (now + 1, now + 2, false),       // future range - invalid
+            (1514764800, 1514764800, false), // same timestamps - invalid
+            (1514764801, 1514764800, false), // end before start - invalid
+        ];
+
+        for (start, end, expected) in cases {
+            assert_eq!(
+                is_valid_time_range(start, end),
+                expected,
+                "Failed for start: {}, end: {}",
+                start,
+                end
             );
         }
     }

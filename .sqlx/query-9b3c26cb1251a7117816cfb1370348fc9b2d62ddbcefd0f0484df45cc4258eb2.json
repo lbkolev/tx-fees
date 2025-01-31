@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT * FROM batch_jobs WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "start_time",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "end_time",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "start_block",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "end_block",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9b3c26cb1251a7117816cfb1370348fc9b2d62ddbcefd0f0484df45cc4258eb2"
+}

@@ -22,6 +22,7 @@ alloy-contract = { version = "0.0.0-reserved" }
 chrono = { version = "0.4.39", features = ["serde"] }
 eyre = "0.6.12"
 futures-util = "0.3.31"
+redis = { version = "0.28.2", features = ["tokio-comp"] }
 regex = "1.11.1"
 reqwest = "0.12.12"
 serde = { version = "1.0.217", features = ["derive"] }

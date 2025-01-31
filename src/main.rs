@@ -17,6 +17,8 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|_| "wss://mainnet.gateway.tenderly.co/".to_string());
     let database_url = std::env::var("DATABASE_URL")
         .unwrap_or_else(|_| "postgresql://user:password@0.0.0.0:5432/tx_fees".to_string());
+    let redis_url =
+        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
     let api_host = std::env::var("API_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
     let api_port = std::env::var("API_PORT")
         .unwrap_or_else(|_| "8080".to_string())
@@ -27,13 +29,14 @@ async fn main() -> Result<()> {
         .max_connections(5)
         .connect(&database_url)
         .await?;
+    let redis_client = redis::Client::open(redis_url).expect("Failed to create Redis client");
 
     run_migrations(&db_pool).await?;
     tokio::select! {
         realtime_result = realtime(&db_pool, &rpc_url) => {
             realtime_result?;
         }
-        server_result = AppServer::build(api_host, api_port, db_pool.clone()).await?.run_until_stopped() => {
+        server_result = AppServer::build(api_host, api_port, db_pool.clone(), redis_client).await?.run_until_stopped() => {
             server_result?;
         }
     }
