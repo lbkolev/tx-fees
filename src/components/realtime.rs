@@ -10,8 +10,10 @@ use tracing::info;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::helpers::{calculate_tx_fee_usdt, store_block, store_tx};
-use crate::price_providers::{get_pair_price, Binance};
+use crate::{
+    helpers::{calculate_tx_fee_usdt, store_block, store_tx},
+    price_providers::{get_pair_price, Binance},
+};
 
 // uniswapV3 pool
 const ETH_USDC_POOL: Address = address!("0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640");
