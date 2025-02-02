@@ -36,7 +36,7 @@ async fn test_get_fee_success() {
 
     let tx_hash = "0xc0dc5948835b50337e8548dc7518dafd3f65b12b1e5f381b7f16684124924a54";
     let response = client
-        .get(format!("{}/fee/{tx_hash}", &app.address))
+        .get(format!("{}/v1/fees/{tx_hash}", &app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -61,7 +61,7 @@ async fn test_get_fee_invalid_tx_hash() {
     let client = Client::new();
 
     let response = client
-        .get(format!("{}/fee/invalidhash", &app.address))
+        .get(format!("{}/v1/fees/invalidhash", &app.address))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -81,7 +81,7 @@ async fn test_get_fee_tx_not_found() {
 
     let tx_hash = "0xc0dc5948835b50337e8548dc7518dafd3f65b12b1e5f381b7f16684124924a54";
     let response = client
-        .get(format!("{}/fee/{}", &app.address, tx_hash))
+        .get(format!("{}/v1/fees/{}", &app.address, tx_hash))
         .send()
         .await
         .expect("Failed to execute request.");
@@ -102,13 +102,13 @@ async fn test_batch_job_success() {
     });
 
     let response = client
-        .post(format!("{}/batch_job", &app.address))
+        .post(format!("{}/v1/jobs", &app.address))
         .json(&request)
         .send()
         .await
         .expect("Failed to execute request.");
 
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status(), 201);
 
     // verify response contains job_id
     let body: serde_json::Value = response.json().await.expect("Failed to parse JSON");
@@ -184,7 +184,7 @@ async fn test_batch_job_invalid_time_range() {
 
     for (request, test_case) in test_cases {
         let response = client
-            .post(format!("{}/batch_job", &app.address))
+            .post(format!("{}/v1/jobs", &app.address))
             .json(&request)
             .send()
             .await
@@ -239,7 +239,7 @@ async fn test_batch_job_malformed_request() {
 
     for (request, test_case) in test_cases {
         let response = client
-            .post(format!("{}/batch_job", &app.address))
+            .post(format!("{}/v1/jobs", &app.address))
             .json(&request)
             .send()
             .await
