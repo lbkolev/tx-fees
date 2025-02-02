@@ -23,12 +23,12 @@ use crate::components::api::{
 )]
 struct ApiDoc;
 
-pub struct AppServer {
+pub struct ServerApp {
     port: u16,
     server: Server,
 }
 
-impl AppServer {
+impl ServerApp {
     pub async fn build(
         host: String,
         port: u16,
@@ -46,8 +46,10 @@ impl AppServer {
         self.port
     }
 
-    pub async fn run_until_stopped(self) -> std::result::Result<(), std::io::Error> {
-        self.server.await
+    pub async fn run_until_stopped(self) -> eyre::Result<()> {
+        self.server
+            .await
+            .map_err(|e| eyre::eyre!("Server crashed: failed to accept new connections - {}", e))
     }
 }
 

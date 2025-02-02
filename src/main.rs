@@ -1,7 +1,14 @@
+use clap::Parser;
 use eyre::Result;
+use secrecy::ExposeSecret;
 use sqlx::{postgres::PgPoolOptions, PgPool};
 
-use tx_fees::components::{api::AppServer, batch, realtime::realtime};
+use tracing::info;
+use tx_fees::{
+    args::{Args, Component},
+    components::{api::ServerApp, fee_tracker::FeeTrackerApp, job_executor::JobExecutorApp},
+    configs::{FeeTrackerConfig, JobExecutorConfig},
+};
 
 async fn run_migrations(db_pool: &PgPool) -> Result<()> {
     sqlx::migrate!("./migrations").run(db_pool).await?;
@@ -10,38 +17,61 @@ async fn run_migrations(db_pool: &PgPool) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt().with_thread_ids(true).init();
+    let args = Args::parse();
+    info!(args=?args);
 
-    let rpc_url = std::env::var("ETH_WS_RPC_URL")
-        .unwrap_or_else(|_| "wss://mainnet.gateway.tenderly.co/".to_string());
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgresql://user:password@0.0.0.0:5432/tx_fees".to_string());
-    let redis_url =
-        std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
-    let api_host = std::env::var("API_HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let api_port = std::env::var("API_PORT")
-        .unwrap_or_else(|_| "8080".to_string())
-        .parse::<u16>()
-        .expect("Invalid API_PORT");
-
+    /*
+     setup all the external provider connections (db, /websocket/ RPC, redis etc.)
+    */
     let db_pool = PgPoolOptions::new()
-        .max_connections(5)
-        .connect(&database_url)
+        .connect(args.database_url.expose_secret())
         .await?;
-    let redis_client = redis::Client::open(redis_url).expect("Failed to create Redis client");
+    let redis_client = redis::Client::open(args.redis_url.expose_secret().to_string())
+        .expect("Failed to create Redis client");
 
     run_migrations(&db_pool).await?;
-    tokio::select! {
-        realtime_result = realtime(&db_pool, &rpc_url) => {
-            realtime_result?;
-        }
-        server_result = AppServer::build(api_host, api_port, db_pool.clone(), redis_client.clone()).await?.run_until_stopped() => {
-            server_result?;
-        }
-        batch_result = batch::batch(&rpc_url, db_pool.clone(), redis_client) => {
-            batch_result?;
-        }
+
+    let mut tasks = vec![];
+    if args.components.contains(&Component::FeeTracker) {
+        tokio::spawn(FeeTrackerApp::run(
+            FeeTrackerConfig::new(
+                db_pool.clone(),
+                args.rpc_url.expose_secret().to_string().clone(),
+                args.liquidity_pool.clone(),
+                args.price_pair.clone(),
+            )
+            .await,
+        ));
     }
+
+    if args.components.contains(&Component::JobExecutor) {
+        tasks.push(tokio::spawn(JobExecutorApp::run(
+            JobExecutorConfig::new(
+                db_pool.clone(),
+                args.rpc_url.expose_secret().to_string().clone(),
+                args.redis_url.expose_secret().to_string().clone(),
+                args.liquidity_pool.clone(),
+                args.price_pair.clone(),
+            )
+            .await,
+        )));
+    }
+
+    if args.components.contains(&Component::Api) {
+        tasks.push(tokio::spawn(
+            ServerApp::build(
+                args.api_host,
+                args.api_port,
+                db_pool.clone(),
+                redis_client.clone(),
+            )
+            .await?
+            .run_until_stopped(),
+        ));
+    }
+
+    let _ = futures::future::select_all(tasks).await;
 
     Ok(())
 }

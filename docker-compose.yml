@@ -32,6 +32,8 @@ services:
     depends_on:
       - postgres
       - redis
+    env_file:
+      - .envs
     environment:
       DATABASE_URL: postgresql://user:password@postgres:5432/tx_fees?sslmode=disable
       REDIS_URL: redis://redis:6379
