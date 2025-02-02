@@ -9,7 +9,6 @@ use alloy::{
 use eyre::Result;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
-use tokio::time::{sleep, Duration};
 use tracing::info;
 
 use crate::{
@@ -45,6 +44,10 @@ async fn find_closest_block(
         .get_block(BlockId::latest(), BlockTransactionsKind::Hashes)
         .await?
         .unwrap();
+    info!(
+        "Latest block: number={}, timestamp={}",
+        latest_block.header.number, latest_block.header.timestamp
+    );
 
     let mut estimated_block = avg_ts_to_block_number(
         AVG_BLOCK_TIME, // avg block time
@@ -52,6 +55,7 @@ async fn find_closest_block(
         latest_block.header.timestamp as i64,
         latest_block.header.number,
     );
+    info!("target block estimate: {}", estimated_block);
 
     loop {
         /*
@@ -64,6 +68,10 @@ async fn find_closest_block(
             .await?
             .unwrap();
         let current_ts = current_block.header.timestamp as i64;
+        info!(
+            "Checking block {} with timestamp {}, target_ts={}",
+            estimated_block, current_ts, target_ts
+        );
 
         if target_ts == current_ts {
             return Ok(current_block.header.number);
@@ -115,14 +123,34 @@ async fn find_closest_block(
     }
 }
 
+/*
+ * Get all events in the given block range
+ * 1. receives a filter with start and end block numbers, and the pool address
+ * 2. retrieves all logs in the range
+ * 3. filters unique transactions
+ * 4. retrieves transaction receipts
+ * 5. groups transactions by block number
+ * 6. retrieves block details
+ * 7. calculates transaction fees
+ *
+ * there's quite a lot of room for improvement here, for example
+ * - we can first check if a similar job has been processed before
+ * - we can batch process transactions in a single block
+ * - when the range is too large, we can split it into smaller chunks because the provider might not return all logs at once
+ * - we can bulk insert the data into the database
+ */
 async fn get_events_range(
     provider: &RootProvider<PubSubFrontend>,
     filter: Filter,
 ) -> Result<HashMap<(u64, i64), Vec<(String, u128, u64)>>> {
+    info!("Starting get_events_range with filter: {:?}", filter);
     let mut events_by_block = HashMap::new();
 
     let logs = provider.get_logs(&filter).await?;
+    info!("Received {} logs from filter", logs.len());
+
     let unique_txs: HashSet<_> = logs.iter().filter_map(|log| log.transaction_hash).collect();
+    info!("Processing {} unique transactions", unique_txs.len());
 
     for tx_hash in unique_txs {
         let receipt = provider.get_transaction_receipt(tx_hash).await?.unwrap();
@@ -159,8 +187,18 @@ struct BatchJob {
     status: String,
 }
 
+/*
+ * The main component that listens for new jobs in the Redis queue
+ * and processes them one by one. Each job process goes through the following steps:
+ * 1. Receive a new job from the redis queue
+ * 2. Update the job status to 'processing' in the database
+ * 3. Find the closest block numbers to the start and end timestamps
+ * 4. Retrieve all events in the block range
+ * 5. Calculate transaction fees for each transaction
+ * 6. Store the block and transaction details in the database
+ *
+*/
 pub struct JobExecutorApp;
-
 impl JobExecutorApp {
     pub async fn run(config: JobExecutorConfig) -> Result<()> {
         let mut con = config
@@ -168,9 +206,11 @@ impl JobExecutorApp {
             .get_multiplexed_async_connection()
             .await?;
         let price_provider = Binance::new("ETHUSDT");
+        let provider = config.provider.clone();
 
         loop {
             // BRPOP returns (key, value) tuple as strings
+            info!("Waiting for new jobs...");
             let result: Option<(String, String)> = con.brpop("batch_jobs", 0.0).await?;
 
             if let Some((_, job_id_str)) = result {
@@ -180,6 +220,10 @@ impl JobExecutorApp {
                     sqlx::query_as!(BatchJob, "SELECT id, start_time, end_time, start_block, end_block, status FROM batch_jobs WHERE id = $1", job_id)
                         .fetch_one(&config.db_pool)
                         .await?;
+                info!(
+                    "Job details - start_time: {}, end_time: {}, status: {}",
+                    job.start_time, job.end_time, job.status
+                );
 
                 if job.status != "pending" {
                     info!("Ignoring job {} with status {}", job.id, job.status);
@@ -194,9 +238,12 @@ impl JobExecutorApp {
                 .await?;
                 info!("Processing job {}", job_id);
 
-                let start_block =
-                    find_closest_block(&config.provider.clone(), job.start_time).await?;
-                let end_block = find_closest_block(&config.provider.clone(), job.end_time).await?;
+                let start_block = find_closest_block(&provider, job.start_time).await?;
+                let end_block = find_closest_block(&provider, job.end_time).await?;
+                info!(
+                    "Block range found - start: {}, end: {}",
+                    start_block, end_block
+                );
 
                 sqlx::query!(
                     "UPDATE batch_jobs SET start_block = $1, end_block = $2 WHERE id = $3",
@@ -211,12 +258,17 @@ impl JobExecutorApp {
                     .from_block(start_block)
                     .to_block(end_block)
                     .address(config.pool_address);
-                let events = get_events_range(&config.provider.clone(), filter).await?;
+                let events = get_events_range(&provider, filter).await?;
                 info!("Found {} blocks with events", events.len());
 
                 for ((block_num, _), txs) in events {
-                    let block = config
-                        .provider
+                    info!(
+                        "Processing block {} with {} transactions",
+                        block_num,
+                        txs.len(),
+                    );
+
+                    let block = provider
                         .get_block(BlockId::number(block_num), BlockTransactionsKind::Hashes)
                         .await?
                         .unwrap();
@@ -262,9 +314,6 @@ impl JobExecutorApp {
 
                 info!("Completed job {}", job_id);
             }
-
-            // delay to prevent tight loop
-            sleep(Duration::from_millis(100)).await;
         }
     }
 }
@@ -345,6 +394,7 @@ mod tests {
         let provider = setup_provider(None).await;
 
         let test_cases = vec![
+            //   (target timestmap, expected block, error message)
             (1471758485, 2111111, "Historical block from 2016"),
             (1438269988, 1, "Near genesis block"),
             (1730685059, 21111111, "Standard case - exact block match"),

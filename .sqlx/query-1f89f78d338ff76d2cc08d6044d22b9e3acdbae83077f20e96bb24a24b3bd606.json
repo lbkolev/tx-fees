@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT status, start_block, end_block FROM batch_jobs WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "start_block",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "end_block",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "1f89f78d338ff76d2cc08d6044d22b9e3acdbae83077f20e96bb24a24b3bd606"
+}

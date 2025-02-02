@@ -24,9 +24,51 @@ services:
     volumes:
       - redis_data:/data
 
-  tx-fees:
+  # The app can run as a single monolith that does everything, but it can also be split into multiple
+  # separate components that can be run independently.
+  #
+  #tx-fees:
+  #  build: .
+  #  container_name: tx_fees
+  #  ports:
+  #    - "8080:8080"
+  #  depends_on:
+  #    - postgres
+  #    - redis
+  #  env_file:
+  #    - .envs
+  #  environment:
+  #    # optional, the program defaults to a public RPC provider
+  #    #ETH_WS_RPC_URL: ..
+  #  entrypoint: ["/app/tx-fees"]
+
+  tx-fees_fee_tracker:
     build: .
-    container_name: tx_fees
+    container_name: tx_fees_fee_tracker
+    depends_on:
+      - postgres
+      - redis
+    env_file:
+      - .envs
+    environment:
+      COMPONENTS: fee-tracker
+    entrypoint: ["/app/tx-fees"]
+
+  tx-fees_job_executor:
+    build: .
+    container_name: tx_fees_job_executor
+    depends_on:
+      - postgres
+      - redis
+    env_file:
+      - .envs
+    environment:
+      COMPONENTS: job-executor
+    entrypoint: ["/app/tx-fees"]
+
+  tx-fees_api_server:
+    build: .
+    container_name: tx_fees_api_server
     ports:
       - "8080:8080"
     depends_on:
@@ -35,10 +77,7 @@ services:
     env_file:
       - .envs
     environment:
-      DATABASE_URL: postgresql://user:password@postgres:5432/tx_fees?sslmode=disable
-      REDIS_URL: redis://redis:6379
-      # optional, the program defaults to a public RPC provider
-      #ETH_WS_RPC_URL: ..
+      COMPONENTS: api
     entrypoint: ["/app/tx-fees"]
 
 volumes:

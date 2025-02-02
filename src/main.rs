@@ -7,7 +7,7 @@ use tracing::info;
 use tx_fees::{
     args::{Args, Component},
     components::{api::ServerApp, fee_tracker::FeeTrackerApp, job_executor::JobExecutorApp},
-    configs::{FeeTrackerConfig, JobExecutorConfig},
+    configs::{FeeTrackerConfig, JobExecutorConfig, ServerConfig},
 };
 
 async fn run_migrations(db_pool: &PgPool) -> Result<()> {
@@ -22,19 +22,28 @@ async fn main() -> Result<()> {
     info!(args=?args);
 
     /*
-     setup all the external provider connections (db, /websocket/ RPC, redis etc.)
-    */
+     * setup all the external provider connections (db, /websocket/ RPC, redis etc.)
+     */
     let db_pool = PgPoolOptions::new()
         .connect(args.database_url.expose_secret())
         .await?;
-    let redis_client = redis::Client::open(args.redis_url.expose_secret().to_string())
-        .expect("Failed to create Redis client");
 
+    /*
+     * run the migrations on startup to ensure the db schema is up to date
+     * and for the sake of simplicity
+     */
     run_migrations(&db_pool).await?;
 
+    /*
+     * each one of the core responsibilities is delegated to a separate component
+     * that is started in a separate task.
+     * 1. `FeeTracker` - responsible for tracking the live fees/txs for a given liquidity pool
+     * 2. `JobExecutor` - responsible for executing the jobs that are scheduled by the user through the API
+     * 3. `API` - responsible for exposing the API to the user
+     */
     let mut tasks = vec![];
     if args.components.contains(&Component::FeeTracker) {
-        tokio::spawn(FeeTrackerApp::run(
+        tasks.push(tokio::spawn(FeeTrackerApp::run(
             FeeTrackerConfig::new(
                 db_pool.clone(),
                 args.rpc_url.expose_secret().to_string().clone(),
@@ -42,7 +51,7 @@ async fn main() -> Result<()> {
                 args.price_pair.clone(),
             )
             .await,
-        ));
+        )));
     }
 
     if args.components.contains(&Component::JobExecutor) {
@@ -60,12 +69,12 @@ async fn main() -> Result<()> {
 
     if args.components.contains(&Component::Api) {
         tasks.push(tokio::spawn(
-            ServerApp::build(
+            ServerApp::build(ServerConfig::new(
+                db_pool.clone(),
+                args.redis_url.expose_secret().to_string().clone(),
                 args.api_host,
                 args.api_port,
-                db_pool.clone(),
-                redis_client.clone(),
-            )
+            ))
             .await?
             .run_until_stopped(),
         ));

@@ -78,9 +78,25 @@ impl JobExecutorConfig {
 }
 
 #[derive(Debug)]
-pub struct ApiConfig {
+pub struct ServerConfig {
+    pub db_pool: PgPool,
+    pub redis_client: redis::Client,
+
     /// The host to bind the API to
     pub host: String,
     /// The port to bind the API to
     pub port: u16,
+}
+
+impl ServerConfig {
+    pub fn new(db_pool: PgPool, redis_url: String, host: String, port: u16) -> Self {
+        let redis_client = redis::Client::open(redis_url).expect("Failed to create Redis client");
+
+        Self {
+            db_pool,
+            redis_client,
+            host,
+            port,
+        }
+    }
 }

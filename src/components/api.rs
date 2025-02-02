@@ -8,12 +8,15 @@ use sqlx::PgPool;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-use crate::components::api::{
-    fees::{__path_get_tx_fee, get_tx_fee, TxFee},
-    jobs::{
-        __path_create_batch_job, __path_get_job_status, create_batch_job, get_job_status,
-        BatchJobRequest, BatchJobResponse,
+use crate::{
+    components::api::{
+        fees::{__path_get_tx_fee, get_tx_fee, TxFee},
+        jobs::{
+            __path_create_batch_job, __path_get_job_status, create_batch_job, get_job_status,
+            BatchJobRequest, BatchJobResponse,
+        },
     },
+    configs::ServerConfig,
 };
 
 #[derive(OpenApi)]
@@ -29,15 +32,10 @@ pub struct ServerApp {
 }
 
 impl ServerApp {
-    pub async fn build(
-        host: String,
-        port: u16,
-        db_pool: PgPool,
-        redis_client: redis::Client,
-    ) -> eyre::Result<Self> {
-        let listener = TcpListener::bind(format!("{}:{}", host, port))?;
+    pub async fn build(config: ServerConfig) -> eyre::Result<Self> {
+        let listener = TcpListener::bind(format!("{}:{}", config.host, config.port))?;
         let port = listener.local_addr().unwrap().port();
-        let server = start_server(listener, db_pool, redis_client)?;
+        let server = start_server(listener, config.db_pool, config.redis_client)?;
 
         Ok(Self { port, server })
     }
@@ -62,6 +60,8 @@ fn start_server(
         App::new()
             .app_data(web::Data::new(db_pool.clone()))
             .app_data(web::Data::new(redis_client.clone()))
+            // used to check the healthiness of the Server,
+            // for example by load balancers
             .route(
                 "/health",
                 web::get().to(|| async { HttpResponse::Ok().finish() }),
