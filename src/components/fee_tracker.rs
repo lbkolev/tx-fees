@@ -14,6 +14,11 @@ use crate::{
     price_providers::{get_pair_price, Binance},
 };
 
+/*
+ * Listens for new txs in the pool and calculates the fee in USDT
+ * based on the effective gas price, gas used and the ETH/USDT price at the time the
+ * block got confirmed. (i.e all txs in a block use the same ETH/USDT price)
+ */
 pub struct FeeTrackerApp;
 
 impl FeeTrackerApp {

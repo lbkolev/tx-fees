@@ -22,16 +22,25 @@ async fn main() -> Result<()> {
     info!(args=?args);
 
     /*
-     setup all the external provider connections (db, /websocket/ RPC, redis etc.)
-    */
+     * setup all the external provider connections (db, /websocket/ RPC, redis etc.)
+     */
     let db_pool = PgPoolOptions::new()
         .connect(args.database_url.expose_secret())
         .await?;
 
-    // run the migrations on startup to ensure the db schema is up to date
-    // and for the sake of simplicity
+    /*
+     * run the migrations on startup to ensure the db schema is up to date
+     * and for the sake of simplicity
+     */
     run_migrations(&db_pool).await?;
 
+    /*
+     * each one of the core responsibilities is delegated to a separate component
+     * that is started in a separate task.
+     * 1. `FeeTracker` - responsible for tracking the live fees/txs for a given liquidity pool
+     * 2. `JobExecutor` - responsible for executing the jobs that are scheduled by the user through the API
+     * 3. `API` - responsible for exposing the API to the user
+     */
     let mut tasks = vec![];
     if args.components.contains(&Component::FeeTracker) {
         tasks.push(tokio::spawn(FeeTrackerApp::run(

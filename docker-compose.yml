@@ -24,8 +24,8 @@ services:
     volumes:
       - redis_data:/data
 
-  # The app can run as a single monolith that does everything, but it can also be split into multiple components
-  # that can be run separately.
+  # The app can run as a single monolith that does everything, but it can also be split into multiple
+  # separate components that can be run independently.
   #
   #tx-fees:
   #  build: .
