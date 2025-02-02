@@ -1,5 +1,4 @@
-use actix_web::dev::Server;
-use actix_web::{web, App, HttpResponse, HttpServer};
+use actix_web::{dev::Server, web, App, HttpResponse, HttpServer};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -8,9 +7,11 @@ use tracing::{error, warn};
 use utoipa::{OpenApi, ToSchema};
 use utoipa_swagger_ui::SwaggerUi;
 
-use std::fmt::Display;
-use std::net::TcpListener;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    fmt::Display,
+    net::TcpListener,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 #[derive(Serialize, ToSchema)]
 struct TxFee {

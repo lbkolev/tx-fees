@@ -1,9 +1,7 @@
-use tx_fees::components::api::AppServer;
-use tx_fees::components::batch;
-use tx_fees::components::realtime::realtime;
-
 use eyre::Result;
 use sqlx::{postgres::PgPoolOptions, PgPool};
+
+use tx_fees::components::{api::AppServer, batch, realtime::realtime};
 
 async fn run_migrations(db_pool: &PgPool) -> Result<()> {
     sqlx::migrate!("./migrations").run(db_pool).await?;

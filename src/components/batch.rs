@@ -1,18 +1,21 @@
-use alloy::eips::BlockId;
-use alloy::primitives::{address, Address};
-use alloy::providers::{Provider, ProviderBuilder, WsConnect};
-use alloy::rpc::types::BlockTransactionsKind;
-use alloy::rpc::types::Filter;
-use sqlx::PgPool;
-
+use alloy::{
+    eips::BlockId,
+    primitives::{address, Address},
+    providers::{Provider, ProviderBuilder, WsConnect},
+    rpc::types::{BlockTransactionsKind, Filter},
+};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use sqlx::PgPool;
 use tokio::time::{sleep, Duration};
 use tracing::info;
 
-use crate::helpers::{store_block, store_tx};
-use crate::price_providers::{get_pair_price, Binance};
+use std::collections::{HashMap, HashSet};
+
+use crate::{
+    helpers::{store_block, store_tx},
+    price_providers::{get_pair_price, Binance},
+};
 
 use eyre::Result;
 
