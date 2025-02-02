@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE batch_jobs SET status = 'processing', updated_at = NOW() WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "02dd1cd261c703f038fbb71d2be2f40712735423fede01c0f32ff788f87e87b9"
+}

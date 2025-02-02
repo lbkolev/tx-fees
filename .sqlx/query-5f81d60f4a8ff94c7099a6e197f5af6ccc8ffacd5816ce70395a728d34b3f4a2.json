@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE batch_jobs SET start_block = $1, end_block = $2 WHERE id = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5f81d60f4a8ff94c7099a6e197f5af6ccc8ffacd5816ce70395a728d34b3f4a2"
+}
