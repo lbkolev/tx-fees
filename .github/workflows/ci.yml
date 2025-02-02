@@ -19,8 +19,6 @@ jobs:
       matrix:
         toolchain:
           - stable
-          - beta
-          - nightly
     services:
       postgres:
         image: postgres:16
