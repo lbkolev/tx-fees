@@ -2,6 +2,7 @@ use sqlx::{postgres::PgPoolOptions, PgPool};
 use uuid::Uuid;
 
 use tx_fees::components::api::ServerApp;
+use tx_fees::configs::ServerConfig;
 
 pub async fn setup_test_db() -> std::result::Result<(PgPool, String), sqlx::Error> {
     let db_url = std::env::var("TEST_DATABASE_URL")
@@ -66,14 +67,15 @@ pub async fn spawn_test_server() -> TestServer {
     let (db_pool, db_name) = setup_test_db().await.unwrap();
     let redis_url =
         std::env::var("TEST_REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
-    let redis_client = redis::Client::open(redis_url).expect("Failed to create Redis client");
+    let redis_client =
+        redis::Client::open(redis_url.clone()).expect("Failed to create Redis client");
 
-    let server_app = ServerApp::build(
+    let server_app = ServerApp::build(ServerConfig::new(
+        db_pool.clone(),
+        redis_url.clone(),
         "localhost".to_string(),
         0,
-        db_pool.clone(),
-        redis_client.clone(),
-    )
+    ))
     .await
     .expect("Failed to build the Server application.");
 
