@@ -3,10 +3,14 @@
 #ETH_WS_RPC_URL=
 
 # PostgreSQL database connection URL
-#DATABASE_URL=
+# since we run the postgres instance in a container we have to reference it through
+# it's service name `postgres`
+DATABASE_URL=postgresql://user:password@postgres:5432/tx_fees?sslmode=disable
 
 # Redis connection URL
-#REDIS_URL=
+# since we run the redis instance in a container we have to reference it through
+# it's service name `redis`
+REDIS_URL=redis://redis:6379
 
 # API host address
 #API_HOST=

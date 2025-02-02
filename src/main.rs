@@ -7,7 +7,7 @@ use tracing::info;
 use tx_fees::{
     args::{Args, Component},
     components::{api::ServerApp, fee_tracker::FeeTrackerApp, job_executor::JobExecutorApp},
-    configs::{FeeTrackerConfig, JobExecutorConfig},
+    configs::{FeeTrackerConfig, JobExecutorConfig, ServerConfig},
 };
 
 async fn run_migrations(db_pool: &PgPool) -> Result<()> {
@@ -27,14 +27,14 @@ async fn main() -> Result<()> {
     let db_pool = PgPoolOptions::new()
         .connect(args.database_url.expose_secret())
         .await?;
-    let redis_client = redis::Client::open(args.redis_url.expose_secret().to_string())
-        .expect("Failed to create Redis client");
 
+    // run the migrations on startup to ensure the db schema is up to date
+    // and for the sake of simplicity
     run_migrations(&db_pool).await?;
 
     let mut tasks = vec![];
     if args.components.contains(&Component::FeeTracker) {
-        tokio::spawn(FeeTrackerApp::run(
+        tasks.push(tokio::spawn(FeeTrackerApp::run(
             FeeTrackerConfig::new(
                 db_pool.clone(),
                 args.rpc_url.expose_secret().to_string().clone(),
@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
                 args.price_pair.clone(),
             )
             .await,
-        ));
+        )));
     }
 
     if args.components.contains(&Component::JobExecutor) {
@@ -60,12 +60,12 @@ async fn main() -> Result<()> {
 
     if args.components.contains(&Component::Api) {
         tasks.push(tokio::spawn(
-            ServerApp::build(
+            ServerApp::build(ServerConfig::new(
+                db_pool.clone(),
+                args.redis_url.expose_secret().to_string().clone(),
                 args.api_host,
                 args.api_port,
-                db_pool.clone(),
-                redis_client.clone(),
-            )
+            ))
             .await?
             .run_until_stopped(),
         ));
