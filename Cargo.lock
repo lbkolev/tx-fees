@@ -4594,6 +4594,7 @@ dependencies = [
  "chrono",
  "eyre",
  "futures-util",
+ "lazy_static",
  "redis",
  "regex",
  "reqwest",

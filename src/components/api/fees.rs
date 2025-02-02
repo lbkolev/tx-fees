@@ -40,7 +40,10 @@ fn is_valid_tx_hash(tx_hash: &str) -> bool {
         (status = 500, description = "Internal server error"),
     )
 )]
-pub async fn get_fee(db_pool: web::Data<sqlx::PgPool>, tx_hash: web::Path<String>) -> HttpResponse {
+pub async fn get_tx_fee(
+    db_pool: web::Data<sqlx::PgPool>,
+    tx_hash: web::Path<String>,
+) -> HttpResponse {
     let tx_hash_str = tx_hash.into_inner();
 
     // validate tx_hash format
