@@ -1,3 +1,3 @@
 pub mod api;
-pub mod historical_data;
-pub mod realtime_data;
+pub mod batch;
+pub mod realtime;

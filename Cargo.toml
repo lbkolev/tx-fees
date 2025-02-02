@@ -44,3 +44,4 @@ utoipa-swagger-ui = { version = "9.0.0", features = ["actix-web"] }
 [dev-dependencies]
 serial_test = "3.2.0"
 uuid = { version = "1.12.1", features = ["v4"] }
+wiremock = "0.6.2"

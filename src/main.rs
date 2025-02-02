@@ -1,5 +1,6 @@
 use tx_fees::components::api::AppServer;
-use tx_fees::components::realtime_data::realtime;
+use tx_fees::components::batch;
+use tx_fees::components::realtime::realtime;
 
 use eyre::Result;
 use sqlx::{postgres::PgPoolOptions, PgPool};
@@ -36,8 +37,11 @@ async fn main() -> Result<()> {
         realtime_result = realtime(&db_pool, &rpc_url) => {
             realtime_result?;
         }
-        server_result = AppServer::build(api_host, api_port, db_pool.clone(), redis_client).await?.run_until_stopped() => {
+        server_result = AppServer::build(api_host, api_port, db_pool.clone(), redis_client.clone()).await?.run_until_stopped() => {
             server_result?;
+        }
+        batch_result = batch::batch(&rpc_url, db_pool.clone(), redis_client) => {
+            batch_result?;
         }
     }
 
