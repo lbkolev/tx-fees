@@ -61,9 +61,4 @@ load it's handling.
 getting the ETH/USDT price only once per block (considering the block contains TXs that interact with our pool), so
 `FeeTracker` is never getting rate limited by our eth/usdt price provider.
 
-- The `JobExecutor` is designed to be horizontally scalable. It can be run on multiple instances and each instance will
-pick up a different job from the queue. This way we can process multiple jobs in parallel. Esp. helpful
-since the historical data processing can be quite intensive and time-consuming with large enough `start_time` and `end_time` timestamp ranges.
-
-- The `Api` is also designed to be horizontally scalable. It can be run on multiple instances and each instance will
-spin up a fresh new API server. This way we can handle more requests in parallel.
+- The `Api` & `JobExecutor` are both designed to be horizontally scalable.
