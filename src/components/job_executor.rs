@@ -2,18 +2,18 @@ use std::collections::{HashMap, HashSet};
 
 use alloy::{
     eips::BlockId,
-    primitives::{address, Address},
-    providers::{Provider, ProviderBuilder, WsConnect},
+    providers::{Provider, RootProvider},
+    pubsub::PubSubFrontend,
     rpc::types::{BlockTransactionsKind, Filter},
 };
 use eyre::Result;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
 use tokio::time::{sleep, Duration};
 use tracing::info;
 
 use crate::{
+    configs::JobExecutorConfig,
     helpers::{store_block, store_tx},
     price_providers::{get_pair_price, Binance},
 };
@@ -35,13 +35,12 @@ fn avg_ts_to_block_number(
     }
 }
 
-async fn find_closest_block(rpc_url: &str, target_ts: i64) -> Result<u64> {
+async fn find_closest_block(
+    provider: &RootProvider<PubSubFrontend>,
+    target_ts: i64,
+) -> Result<u64> {
     const AVG_BLOCK_TIME: i8 = 12;
 
-    let ws = WsConnect::new(rpc_url);
-    let provider = ProviderBuilder::new().on_ws(ws).await?;
-
-    // ret the latest block
     let latest_block = provider
         .get_block(BlockId::latest(), BlockTransactionsKind::Hashes)
         .await?
@@ -117,20 +116,10 @@ async fn find_closest_block(rpc_url: &str, target_ts: i64) -> Result<u64> {
 }
 
 async fn get_events_range(
-    rpc_url: &str,
-    start_block: u64,
-    end_block: u64,
+    provider: &RootProvider<PubSubFrontend>,
+    filter: Filter,
 ) -> Result<HashMap<(u64, i64), Vec<(String, u128, u64)>>> {
     let mut events_by_block = HashMap::new();
-    const ETH_USDC_POOL: Address = address!("0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640");
-
-    let ws = WsConnect::new(rpc_url);
-    let provider = ProviderBuilder::new().on_ws(ws).await?;
-
-    let filter = Filter::new()
-        .from_block(start_block)
-        .to_block(end_block)
-        .address(ETH_USDC_POOL);
 
     let logs = provider.get_logs(&filter).await?;
     let unique_txs: HashSet<_> = logs.iter().filter_map(|log| log.transaction_hash).collect();
@@ -170,102 +159,121 @@ struct BatchJob {
     status: String,
 }
 
-pub async fn batch(rpc_url: &str, db_pool: PgPool, redis_client: redis::Client) -> Result<()> {
-    let mut con = redis_client.get_multiplexed_async_connection().await?;
-    let price_provider = Binance::new("ETHUSDT");
+pub struct JobExecutorApp;
 
-    loop {
-        // BRPOP returns (key, value) tuple as strings
-        let result: Option<(String, String)> = con.brpop("batch_jobs", 0.0).await?;
-
-        if let Some((_, job_id_str)) = result {
-            let job_id: i64 = job_id_str.parse()?;
-
-            let job: BatchJob =
-                sqlx::query_as!(BatchJob, "SELECT id, start_time, end_time, start_block, end_block, status FROM batch_jobs WHERE id = $1", job_id)
-                    .fetch_one(&db_pool)
-                    .await?;
-
-            if job.status != "pending" {
-                info!("Ignoring job {} with status {}", job.id, job.status);
-                continue;
-            }
-
-            sqlx::query!(
-                "UPDATE batch_jobs SET status = 'processing', updated_at = NOW() WHERE id = $1",
-                job_id
-            )
-            .execute(&db_pool)
+impl JobExecutorApp {
+    pub async fn run(config: JobExecutorConfig) -> Result<()> {
+        let mut con = config
+            .redis_client
+            .get_multiplexed_async_connection()
             .await?;
-            info!("Processing job {}", job_id);
+        let price_provider = Binance::new("ETHUSDT");
 
-            let start_block = find_closest_block(rpc_url, job.start_time).await?;
-            let end_block = find_closest_block(rpc_url, job.end_time).await?;
+        loop {
+            // BRPOP returns (key, value) tuple as strings
+            let result: Option<(String, String)> = con.brpop("batch_jobs", 0.0).await?;
 
-            sqlx::query!(
-                "UPDATE batch_jobs SET start_block = $1, end_block = $2 WHERE id = $3",
-                start_block as i64,
-                end_block as i64,
-                job_id
-            )
-            .execute(&db_pool)
-            .await?;
+            if let Some((_, job_id_str)) = result {
+                let job_id: i64 = job_id_str.parse()?;
 
-            let events = get_events_range(rpc_url, start_block, end_block).await?;
-            info!("Found {} blocks with events", events.len());
+                let job: BatchJob =
+                    sqlx::query_as!(BatchJob, "SELECT id, start_time, end_time, start_block, end_block, status FROM batch_jobs WHERE id = $1", job_id)
+                        .fetch_one(&config.db_pool)
+                        .await?;
 
-            let ws = WsConnect::new(rpc_url);
-            let provider = ProviderBuilder::new().on_ws(ws).await?;
-
-            for ((block_num, _), txs) in events {
-                let block = provider
-                    .get_block(BlockId::number(block_num), BlockTransactionsKind::Hashes)
-                    .await?
-                    .unwrap();
-
-                let eth_price =
-                    get_pair_price(&price_provider, Some(block.header.timestamp as i64)).await?;
-
-                let mut tx_fees = Vec::new();
-
-                for (tx_hash, gas_price, gas_used) in txs {
-                    let fee_eth = (gas_price as f64 * gas_used as f64) / 1e18;
-                    let fee_usdt = fee_eth * eth_price;
-
-                    tx_fees.push((tx_hash, fee_usdt));
+                if job.status != "pending" {
+                    info!("Ignoring job {} with status {}", job.id, job.status);
+                    continue;
                 }
 
-                store_block(
-                    &db_pool,
-                    block_num as i64,
-                    &block.header.hash.to_string(),
-                    eth_price,
+                sqlx::query!(
+                    "UPDATE batch_jobs SET status = 'processing', updated_at = NOW() WHERE id = $1",
+                    job_id
                 )
+                .execute(&config.db_pool)
+                .await?;
+                info!("Processing job {}", job_id);
+
+                let start_block =
+                    find_closest_block(&config.provider.clone(), job.start_time).await?;
+                let end_block = find_closest_block(&config.provider.clone(), job.end_time).await?;
+
+                sqlx::query!(
+                    "UPDATE batch_jobs SET start_block = $1, end_block = $2 WHERE id = $3",
+                    start_block as i64,
+                    end_block as i64,
+                    job_id
+                )
+                .execute(&config.db_pool)
                 .await?;
 
-                for (tx_hash, fee_usdt) in tx_fees {
-                    store_tx(&db_pool, &tx_hash, &block.header.hash.to_string(), fee_usdt).await?;
+                let filter = Filter::new()
+                    .from_block(start_block)
+                    .to_block(end_block)
+                    .address(config.pool_address);
+                let events = get_events_range(&config.provider.clone(), filter).await?;
+                info!("Found {} blocks with events", events.len());
+
+                for ((block_num, _), txs) in events {
+                    let block = config
+                        .provider
+                        .get_block(BlockId::number(block_num), BlockTransactionsKind::Hashes)
+                        .await?
+                        .unwrap();
+
+                    let eth_price =
+                        get_pair_price(&price_provider, Some(block.header.timestamp as i64))
+                            .await?;
+
+                    let mut tx_fees = Vec::new();
+
+                    for (tx_hash, gas_price, gas_used) in txs {
+                        let fee_eth = (gas_price as f64 * gas_used as f64) / 1e18;
+                        let fee_usdt = fee_eth * eth_price;
+
+                        tx_fees.push((tx_hash, fee_usdt));
+                    }
+
+                    store_block(
+                        &config.db_pool,
+                        block_num as i64,
+                        &block.header.hash.to_string(),
+                        eth_price,
+                    )
+                    .await?;
+
+                    for (tx_hash, fee_usdt) in tx_fees {
+                        store_tx(
+                            &config.db_pool,
+                            &tx_hash,
+                            &block.header.hash.to_string(),
+                            fee_usdt,
+                        )
+                        .await?;
+                    }
                 }
+
+                sqlx::query!(
+                    "UPDATE batch_jobs SET status = 'completed', updated_at = NOW() WHERE id = $1",
+                    job_id
+                )
+                .execute(&config.db_pool)
+                .await?;
+
+                info!("Completed job {}", job_id);
             }
 
-            sqlx::query!(
-                "UPDATE batch_jobs SET status = 'completed', updated_at = NOW() WHERE id = $1",
-                job_id
-            )
-            .execute(&db_pool)
-            .await?;
-
-            info!("Completed job {}", job_id);
+            // delay to prevent tight loop
+            sleep(Duration::from_millis(100)).await;
         }
-
-        // delay to prevent tight loop
-        sleep(Duration::from_millis(100)).await;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy::{primitives::Address, providers::ProviderBuilder};
+    use std::{env::var, str::FromStr};
 
     #[tokio::test]
     async fn test_avg_closest_block() {
@@ -320,9 +328,21 @@ mod tests {
         }
     }
 
+    async fn setup_provider(rpc_url: Option<&str>) -> RootProvider<PubSubFrontend> {
+        let ws = if let Some(url) = rpc_url {
+            alloy::providers::WsConnect::new(url)
+        } else {
+            alloy::providers::WsConnect::new(
+                &var("TEST_ETH_WS_RPC_URL")
+                    .unwrap_or_else(|_| "wss://mainnet.gateway.tenderly.co/".to_string()),
+            )
+        };
+        ProviderBuilder::new().on_ws(ws).await.unwrap()
+    }
+
     #[tokio::test]
     async fn test_find_closest_block() {
-        let rpc_url = "wss://mainnet.gateway.tenderly.co/";
+        let provider = setup_provider(None).await;
 
         let test_cases = vec![
             (1471758485, 2111111, "Historical block from 2016"),
@@ -334,24 +354,30 @@ mod tests {
         ];
 
         for (timestamp, expected_block, error_msg) in test_cases {
-            let result = find_closest_block(rpc_url, timestamp).await.unwrap();
+            let result = find_closest_block(&provider, timestamp).await.unwrap();
             assert_eq!(result, expected_block, "{}", error_msg);
         }
     }
 
     #[tokio::test]
     async fn test_get_events_range() {
-        let rpc_url = std::env::var("ETH_WS_RPC_URL")
-            .unwrap_or_else(|_| "wss://mainnet.gateway.tenderly.co/".to_string());
+        let provider = setup_provider(None).await;
 
         let start_block = 17000000;
         let end_block = 17000100;
+        let pool_address = Address::from_str(
+            &var("TEST_POOL_ADDRESS")
+                .unwrap_or_else(|_| "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640".to_string()),
+        )
+        .expect("Invalid address format");
 
-        let events = get_events_range(&rpc_url, start_block, end_block)
-            .await
-            .unwrap();
+        let filter = Filter::new()
+            .from_block(start_block)
+            .to_block(end_block)
+            .address(pool_address);
 
-        println!("{:#?}", events);
+        let events = get_events_range(&provider, filter).await.unwrap();
+
         assert!(!events.is_empty(), "Should find some events");
 
         for ((block_num, timestamp), txs) in events {

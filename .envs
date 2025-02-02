@@ -1,0 +1,38 @@
+# Ethereum WebSocket RPC URL (e.g., Infura, Alchemy, or local node)
+# (the default value is courtesy to a public provider)
+#ETH_WS_RPC_URL=
+
+# PostgreSQL database connection URL
+#DATABASE_URL=
+
+# Redis connection URL
+#REDIS_URL=
+
+# API host address
+#API_HOST=
+
+# API port number
+#API_PORT=
+
+# Liquidity pool address to monitor (default: UniswapV3 ETHUSDC pool)
+#LIQUIDITY_POOL=
+
+# Price pair to track (e.g., ETHUSDT in our case)
+#PRICE_PAIR=
+
+# Components to run (comma-separated: fee-tracker,job-executor,api)
+#COMPONENTS=
+
+# ----------------------------
+# --- Test environment variables
+# Test database URL (default points to the main docker-instance, which is fine for our case)
+#TEST_DATABASE_URL=
+
+# Test Redis URL (default points to the main docker-instance, which is fine for our case)
+#TEST_REDIS_URL=
+
+# Test pool address (defaults to ETHUSDC)
+#TEST_POOL_ADDRESS=
+
+# Test Ethereum WebSocket RPC URL (the default value is courtesy to a public provider)
+#TEST_ETH_WS_RPC_URL=
