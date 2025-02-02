@@ -39,3 +39,5 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --all-features
+        env:
+          ETH_WS_RPC_URL: ${{ secrets.ETH_WS_RPC_URL }}

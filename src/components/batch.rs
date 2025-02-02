@@ -1,8 +1,13 @@
 use alloy::eips::BlockId;
+use alloy::primitives::{address, Address};
 use alloy::providers::{Provider, ProviderBuilder, WsConnect};
 use alloy::rpc::types::BlockTransactionsKind;
+use alloy::rpc::types::Filter;
+use sqlx::PgPool;
+
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use tokio::time::{sleep, Duration};
 use tracing::info;
 
@@ -109,12 +114,6 @@ async fn find_closest_block(rpc_url: &str, target_ts: i64) -> Result<u64> {
     }
 }
 
-use alloy::primitives::{address, Address};
-use alloy::rpc::types::Filter;
-use sqlx::PgPool;
-
-use std::collections::{HashMap, HashSet};
-
 async fn get_events_range(
     rpc_url: &str,
     start_block: u64,
@@ -134,7 +133,6 @@ async fn get_events_range(
     let logs = provider.get_logs(&filter).await?;
     let unique_txs: HashSet<_> = logs.iter().filter_map(|log| log.transaction_hash).collect();
 
-    // First group by block number
     for tx_hash in unique_txs {
         let receipt = provider.get_transaction_receipt(tx_hash).await?.unwrap();
         let block_num = receipt.block_number.unwrap();
@@ -148,7 +146,6 @@ async fn get_events_range(
             ));
     }
 
-    // Then fetch all block timestamps at once
     let mut final_events = HashMap::new();
     for (block_num, txs) in events_by_block {
         let block = provider
