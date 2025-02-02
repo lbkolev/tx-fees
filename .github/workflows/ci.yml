@@ -19,6 +19,8 @@ jobs:
       matrix:
         toolchain:
           - stable
+          - beta
+          - nightly
     services:
       postgres:
         image: postgres:16
@@ -38,4 +40,4 @@ jobs:
       - run: cargo test --all-features
         env:
           ETH_WS_RPC_URL: ${{ secrets.ETH_WS_RPC_URL }}
-          TEST_WS_RPC_URL: ${{ secrets.TEST_WS_RPC_URL }}
+          TEST_ETH_WS_RPC_URL: ${{ secrets.TEST_WS_RPC_URL }}
