@@ -61,6 +61,7 @@ mod tests {
     use tokio::test;
 
     #[test]
+    #[ignore]
     async fn test_binance_get_pair_price() {
         let provider = Binance::new("ETHUSDT");
 
