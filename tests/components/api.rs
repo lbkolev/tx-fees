@@ -1,9 +1,13 @@
-use crate::utils::{spawn_app, teardown_test_db};
-
 use reqwest::Client;
 use serde_json::json;
 use serial_test::serial;
 use sqlx::PgPool;
+
+use crate::utils::{spawn_test_server, teardown_test_db};
+
+lazy_static::lazy_static! {
+    static ref CLIENT: Client = Client::new();
+}
 
 async fn insert_mock_data(db_pool: &PgPool) {
     sqlx::query!(
@@ -30,12 +34,11 @@ async fn insert_mock_data(db_pool: &PgPool) {
 #[tokio::test]
 #[serial]
 async fn test_get_fee_success() {
-    let app = spawn_app().await;
-    let client = Client::new();
+    let app = spawn_test_server().await;
     insert_mock_data(&app.db_pool).await;
 
     let tx_hash = "0xc0dc5948835b50337e8548dc7518dafd3f65b12b1e5f381b7f16684124924a54";
-    let response = client
+    let response = CLIENT
         .get(format!("{}/v1/fees/{tx_hash}", &app.address))
         .send()
         .await
@@ -57,10 +60,9 @@ async fn test_get_fee_success() {
 
 #[tokio::test]
 async fn test_get_fee_invalid_tx_hash() {
-    let app = spawn_app().await;
-    let client = Client::new();
+    let app = spawn_test_server().await;
 
-    let response = client
+    let response = CLIENT
         .get(format!("{}/v1/fees/invalidhash", &app.address))
         .send()
         .await
@@ -70,38 +72,30 @@ async fn test_get_fee_invalid_tx_hash() {
     let body: serde_json::Value = response.json().await.expect("Failed to parse JSON");
     assert_eq!(body["error"], "Invalid transaction hash format");
 
-    teardown_test_db(app).await.unwrap();
-}
-
-#[tokio::test]
-#[serial]
-async fn test_get_fee_tx_not_found() {
-    let app = spawn_app().await;
-    let client = Client::new();
-
+    // Test with a valid hash but non-existent in the DB
     let tx_hash = "0xc0dc5948835b50337e8548dc7518dafd3f65b12b1e5f381b7f16684124924a54";
-    let response = client
+    let response = CLIENT
         .get(format!("{}/v1/fees/{}", &app.address, tx_hash))
         .send()
         .await
         .expect("Failed to execute request.");
 
     assert_eq!(response.status(), 404);
+
     teardown_test_db(app).await.unwrap();
 }
 
 #[tokio::test]
 #[serial]
-async fn test_batch_job_success() {
-    let app = spawn_app().await;
-    let client = Client::new();
+async fn test_job_success() {
+    let app = spawn_test_server().await;
 
     let request = json!({
         "start_time": 1514764800,  // 2018-01-01
         "end_time": 1514851200     // 2018-01-02
     });
 
-    let response = client
+    let response = CLIENT
         .post(format!("{}/v1/jobs", &app.address))
         .json(&request)
         .send()
@@ -147,9 +141,8 @@ async fn test_batch_job_success() {
 
 #[tokio::test]
 #[serial]
-async fn test_batch_job_invalid_time_range() {
-    let app = spawn_app().await;
-    let client = Client::new();
+async fn test_job_invalid_time_range() {
+    let app = spawn_test_server().await;
 
     let test_cases = vec![
         (
@@ -183,7 +176,7 @@ async fn test_batch_job_invalid_time_range() {
     ];
 
     for (request, test_case) in test_cases {
-        let response = client
+        let response = CLIENT
             .post(format!("{}/v1/jobs", &app.address))
             .json(&request)
             .send()
@@ -208,9 +201,8 @@ async fn test_batch_job_invalid_time_range() {
 
 #[tokio::test]
 #[serial]
-async fn test_batch_job_malformed_request() {
-    let app = spawn_app().await;
-    let client = Client::new();
+async fn test_job_malformed_request() {
+    let app = spawn_test_server().await;
 
     let test_cases = vec![
         (
@@ -238,7 +230,7 @@ async fn test_batch_job_malformed_request() {
     ];
 
     for (request, test_case) in test_cases {
-        let response = client
+        let response = CLIENT
             .post(format!("{}/v1/jobs", &app.address))
             .json(&request)
             .send()
@@ -252,6 +244,58 @@ async fn test_batch_job_malformed_request() {
             test_case
         );
     }
+
+    teardown_test_db(app).await.unwrap();
+}
+
+#[tokio::test]
+#[serial]
+async fn test_get_job_status() {
+    let app = spawn_test_server().await;
+
+    // First create a job
+    let request = json!({
+        "start_time": 1514764800,
+        "end_time": 1514851200
+    });
+
+    let response = CLIENT
+        .post(format!("{}/v1/jobs", &app.address))
+        .json(&request)
+        .send()
+        .await
+        .expect("Failed to create job");
+
+    let job_id = response
+        .json::<serde_json::Value>()
+        .await
+        .expect("Failed to parse JSON")["job_id"]
+        .as_i64()
+        .unwrap();
+
+    // Then get its status
+    let response = CLIENT
+        .get(format!("{}/v1/jobs/{}", &app.address, job_id))
+        .send()
+        .await
+        .expect("Failed to execute request");
+
+    assert_eq!(response.status(), 200);
+
+    let body: serde_json::Value = response.json().await.expect("Failed to parse JSON");
+    assert_eq!(body["job_id"], job_id);
+    assert_eq!(body["status"], "pending");
+    assert_eq!(body["start_time"], 1514764800);
+    assert_eq!(body["end_time"], 1514851200);
+
+    // Test non-existent job
+    let response = CLIENT
+        .get(format!("{}/v1/jobs/99999", &app.address))
+        .send()
+        .await
+        .expect("Failed to execute request");
+
+    assert_eq!(response.status(), 404);
 
     teardown_test_db(app).await.unwrap();
 }

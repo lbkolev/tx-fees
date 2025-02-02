@@ -1,23 +1,22 @@
+use std::collections::{HashMap, HashSet};
+
 use alloy::{
     eips::BlockId,
     primitives::{address, Address},
     providers::{Provider, ProviderBuilder, WsConnect},
     rpc::types::{BlockTransactionsKind, Filter},
 };
+use eyre::Result;
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use tokio::time::{sleep, Duration};
 use tracing::info;
 
-use std::collections::{HashMap, HashSet};
-
 use crate::{
     helpers::{store_block, store_tx},
     price_providers::{get_pair_price, Binance},
 };
-
-use eyre::Result;
 
 /// Find the closest block to the given `target_timestamp`,
 /// given average block production time, block number and timestamp

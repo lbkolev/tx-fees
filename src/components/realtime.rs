@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use alloy::{
     primitives::{address, Address},
     providers::{Provider, ProviderBuilder, WsConnect},
@@ -7,8 +9,6 @@ use eyre::Result;
 use futures_util::stream::StreamExt;
 use sqlx::PgPool;
 use tracing::info;
-
-use std::collections::{HashMap, HashSet};
 
 use crate::{
     helpers::{calculate_tx_fee_usdt, store_block, store_tx},

@@ -2,7 +2,7 @@ use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::PgPool;
-use tracing::error;
+use tracing::{error, warn};
 use utoipa::ToSchema;
 
 use std::{
@@ -11,6 +11,10 @@ use std::{
 };
 
 #[derive(Serialize, Deserialize, ToSchema)]
+#[schema(example = json!({
+    "start_time": 1514764800,
+    "end_time": 1674864000
+}))]
 pub struct BatchJobRequest {
     start_time: i64,
     end_time: i64,
@@ -121,6 +125,73 @@ pub async fn create_batch_job(
     }
 
     HttpResponse::Created().json(BatchJobResponse { job_id })
+}
+
+#[derive(Serialize, ToSchema)]
+pub struct BatchJobStatusResponse {
+    job_id: i64,
+    status: BatchJobStatus,
+    start_time: i64,
+    end_time: i64,
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/jobs/{job_id}",
+    params(
+        ("job_id" = i64, Path, description = "Batch job ID")
+    ),
+    responses(
+        (status = 200, description = "Job status retrieved", body = BatchJobStatusResponse),
+        (status = 404, description = "Job not found"),
+        (status = 500, description = "Internal server error"),
+    )
+)]
+pub async fn get_job_status(db_pool: web::Data<PgPool>, job_id: web::Path<i64>) -> HttpResponse {
+    let job_id = job_id.into_inner();
+
+    match sqlx::query!(
+        "SELECT id, status, start_time, end_time FROM batch_jobs WHERE id = $1",
+        job_id
+    )
+    .fetch_optional(db_pool.get_ref())
+    .await
+    {
+        Ok(Some(job)) => {
+            let status = match job.status.as_str() {
+                "pending" => BatchJobStatus::Pending,
+                "in_progress" => BatchJobStatus::InProgress,
+                "completed" => BatchJobStatus::Completed,
+                _ => {
+                    error!(
+                        job_id = job_id,
+                        status = ?job.status,
+                        "Invalid job status in database"
+                    );
+                    return HttpResponse::InternalServerError().finish();
+                }
+            };
+
+            HttpResponse::Ok().json(BatchJobStatusResponse {
+                job_id: job.id,
+                status,
+                start_time: job.start_time,
+                end_time: job.end_time,
+            })
+        }
+        Ok(None) => {
+            warn!(job_id = job_id, "Job not found");
+            HttpResponse::NotFound().finish()
+        }
+        Err(e) => {
+            error!(
+                error = ?e,
+                job_id = job_id,
+                "Database error while fetching job status"
+            );
+            HttpResponse::InternalServerError().finish()
+        }
+    }
 }
 
 #[cfg(test)]
