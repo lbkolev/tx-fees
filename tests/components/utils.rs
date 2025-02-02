@@ -1,8 +1,7 @@
 use sqlx::{postgres::PgPoolOptions, PgPool};
 use uuid::Uuid;
 
-use tx_fees::components::api::ServerApp;
-use tx_fees::configs::ServerConfig;
+use tx_fees::{components::api::ServerApp, configs::ServerConfig};
 
 pub async fn setup_test_db() -> std::result::Result<(PgPool, String), sqlx::Error> {
     let db_url = std::env::var("TEST_DATABASE_URL")
